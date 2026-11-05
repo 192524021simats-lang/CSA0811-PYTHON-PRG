@@ -1,0 +1,198 @@
+from decimal import Decimal, ROUND_HALF_UP
+from collections import defaultdict
+
+D = Decimal
+CENT = D("0.01")
+
+BASE_RATE = D("30.00")
+BASE_FAT = D("3.5")
+BASE_SNF = D("8.5")
+FAT_STEP = D("0.1")
+SNF_STEP = D("0.1")
+FAT_VALUE = D("0.40")
+SNF_VALUE = D("0.30")
+
+MIN_FAT = D("2.0")
+MAX_FAT = D("7.0")
+
+BONUS_LIMIT = D("500")
+BONUS_RATE = D("0.50")
+
+
+def round_money(value):
+    return value.quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def select_rate_card(month):
+    if month in (4, 5, 6):
+        return {
+            "base": D("32.00"),
+            "fat_value": D("0.35"),
+            "snf_value": D("0.30")
+        }
+
+    return {
+        "base": BASE_RATE,
+        "fat_value": FAT_VALUE,
+        "snf_value": SNF_VALUE
+    }
+
+
+def validate_entry(farmer_id, litres, fat, snf, shift):
+
+    if not farmer_id.strip():
+        raise ValueError("Farmer ID cannot be empty")
+
+    if litres <= 0:
+        raise ValueError("Quantity must be greater than zero")
+
+    if not MIN_FAT <= fat <= MAX_FAT:
+        raise ValueError("Fat must be between 2.0 and 7.0")
+
+    if snf < 0:
+        raise ValueError("SNF cannot be negative")
+
+    if shift.lower() not in ("morning", "evening"):
+        raise ValueError("Invalid shift")
+
+
+def calculate_steps(value, reference, step):
+    return ((value - reference) / step).quantize(
+        D("1"), rounding=ROUND_HALF_UP
+    )
+
+
+def calculate_rate(fat, snf, rate_card):
+
+    fat_steps = calculate_steps(fat, BASE_FAT, FAT_STEP)
+    snf_steps = calculate_steps(snf, BASE_SNF, SNF_STEP)
+
+    rate = (
+        rate_card["base"]
+        + fat_steps * rate_card["fat_value"]
+        + snf_steps * rate_card["snf_value"]
+    )
+
+    return round_money(rate)
+
+
+def calculate_payment(litres, rate):
+    return round_money(litres * rate)
+
+
+def ten_day_totals(entries):
+
+    totals = defaultdict(
+        lambda: [D("0"), D("0.00")]
+    )
+
+    for entry in entries:
+
+        key = (entry["farmer_id"], entry["period"])
+
+        totals[key][0] += entry["litres"]
+        totals[key][1] += entry["payment"]
+
+    return totals
+
+
+def calculate_bonus(litres):
+
+    if litres > BONUS_LIMIT:
+        return round_money(litres * BONUS_RATE)
+
+    return D("0.00")
+
+
+def main():
+
+    entries = []
+
+    print("VILLAGE MILK CO-OPERATIVE PAYMENT CALCULATOR")
+
+    month = int(input("Enter month (1-12): "))
+    period = input("Enter ten-day period: ")
+
+    rate_card = select_rate_card(month)
+
+    print("\nRate card selected:",
+          "April-June" if month in (4, 5, 6) else "Original")
+
+    while True:
+
+        farmer_id = input("\nEnter Farmer ID (Q to quit): ")
+
+        if farmer_id.upper() == "Q":
+            break
+
+        try:
+
+            litres = D(input("Enter quantity in litres: "))
+            fat = D(input("Enter fat percentage: "))
+            snf = D(input("Enter SNF percentage: "))
+            shift = input("Enter shift (Morning/Evening): ")
+
+            validate_entry(
+                farmer_id, litres, fat, snf, shift
+            )
+
+            rate = calculate_rate(
+                fat, snf, rate_card
+            )
+
+            payment = calculate_payment(
+                litres, rate
+            )
+
+            entry = {
+                "farmer_id": farmer_id,
+                "period": period,
+                "litres": litres,
+                "fat": fat,
+                "snf": snf,
+                "shift": shift.title(),
+                "rate": rate,
+                "payment": payment
+            }
+
+            entries.append(entry)
+
+            print("\n----- PAYMENT RECEIPT -----")
+            print("Farmer ID:", farmer_id)
+            print("Quantity:", litres, "litres")
+            print("Fat:", fat, "%")
+            print("SNF:", snf, "%")
+            print("Rate per litre: Rs.", rate)
+            print("Payment: Rs.", payment)
+
+        except (ValueError, ArithmeticError) as error:
+            print("Invalid entry:", error)
+
+    totals = ten_day_totals(entries)
+
+    print("\n========== TEN-DAY PAYMENT SUMMARY ==========")
+
+    if not totals:
+        print("No valid entries recorded.")
+
+    for (farmer_id, period), values in sorted(totals.items()):
+
+        total_litres = values[0]
+        total_payment = values[1]
+
+        bonus = calculate_bonus(total_litres)
+
+        final_payment = round_money(
+            total_payment + bonus
+        )
+
+        print("\nFarmer ID:", farmer_id)
+        print("Period:", period)
+        print("Total litres:", total_litres)
+        print("Base payment: Rs.", total_payment)
+        print("Bonus: Rs.", bonus)
+        print("Final payment: Rs.", final_payment)
+
+
+if __name__ == "__main__":
+    main()
